@@ -1,0 +1,12 @@
+1. list of players on a bet -> Outside struct
+-> mapping(uint -> address[]) -> get list of all user on a bet id.
+
+2. bets played of a users -> Outside struct
+ -> userbets[msg.sender] -> we will get all bets of a user -> run a loop on the bet ids to get details.
+
+3. To get selected teams & betted amount by a user under a bet -> Inside struct
+    mapping(address => uint) selectedTeam;
+    mapping(address => uint) amountBettedOnSlectedTeam;
+
+4. 
+
