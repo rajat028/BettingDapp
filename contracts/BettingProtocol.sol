@@ -6,7 +6,7 @@ import "hardhat/console.sol";
 
 contract BettingProtocol {
     event TeamAdded(uint8 teamId);
-    event TeamDeleted(uint8 teamId);
+    event TeamSetToInActive(uint8 teamId);
     event BetCreated(
         uint betId,
         uint8 teamAId,
@@ -38,13 +38,14 @@ contract BettingProtocol {
     struct Team {
         uint8 teamId;
         string name;
+        bool isActive;
     }
 
     Bet[] public bets;
     mapping(address => uint[]) userBets;
 
     uint8 teamCount;
-    uint8[] public teams;
+    Team[] public teams;
 
     constructor(IERC20 _bettingToken) {
         owner = msg.sender;
@@ -61,18 +62,18 @@ contract BettingProtocol {
         _;
     }
 
-    function addTeam() external onlyOwner {
+    function addTeam(string memory name) external onlyOwner {
         require(!containsTeamId(teamCount), "team already present");
         teamCount++;
-        teams.push(teamCount);
+        teams.push(Team(teamCount, name, true));
         emit TeamAdded(teamCount);
     }
 
-    function deleteTeam(uint8 teamId) external onlyOwner {
-        require(teamId < teams.length, "Invalid team-id");
-        teams[teamId] = teams[teams.length - 1];
-        teams.pop();
-        emit TeamDeleted(teamCount);
+    function setTeamInActive(uint8 teamId) external onlyOwner {
+        require(teamId <= teams.length, "Invalid team-id");
+        Team storage team = teams[teamId];
+        team.isActive = false;
+        emit TeamSetToInActive(teamCount);
     }
 
     function createBet(
@@ -220,6 +221,11 @@ contract BettingProtocol {
         userBets[msg.sender].pop();
     }
 
+    function changeTeamName(string memory newName, uint8 teamId) external {
+        Team storage team = teams[teamId];
+        team.name = newName;
+    }
+
     function removeBettorFromBettedTeam(
         address bettor,
         Bet storage bet
@@ -237,7 +243,7 @@ contract BettingProtocol {
 
     function containsTeamId(uint8 teamId) internal view returns (bool) {
         for (uint i = 1; i <= teams.length; i++) {
-            if (teams[i] == teamId) {
+            if (teams[i].teamId == teamId) {
                 return true;
             }
         }
