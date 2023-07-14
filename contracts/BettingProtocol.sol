@@ -15,7 +15,7 @@ contract BettingProtocol {
         uint minBetAmount
     );
     event FundsPledgedToBet(uint betId, uint8 teamId, uint amount);
-    event UnPledgedFundsFromBet(uint betId, address better, uint returnAmount);
+    event UnPledgedFundsFromBet(uint betId, address bettor, uint returnAmount);
     event BetCompleted(uint betId, uint8 winingTeam);
 
     IERC20 bettingToken;
