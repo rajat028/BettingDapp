@@ -1,16 +1,13 @@
 const { expect } = require("chai")
 const { ethers } = require("hardhat")
 
-async function getEthBalance(address) {
-	const provider = ethers.provider
-	const balance = await provider.getBalance(address)
-	return balance
-}
 
-async function approveAndAllotFunds(better, amount) {
+async function approveAndAllotFunds(betters, amount) {
     const bettingContractAddress = await bettingContract.getContractAddress()
-    await bettingToken.transfer(better.address, amount)
-    await bettingToken.connect(better).approve(bettingContractAddress, amount)
+	for (let i = 0; i < betters.length; i++) {
+		await bettingToken.transfer(betters[i].address, amount)
+		await bettingToken.connect(betters[i]).approve(bettingContractAddress, amount)
+	}
 }
 
 async function addTeamsAndGetTeamIds() {
@@ -48,7 +45,27 @@ function verifyBettorsOnTeam(bettorsCountBefore, bettorsCountAfter, bettorCount)
 	expect(bettorsCountAfter).greaterThan(bettorsCountBefore)
 	expect(bettorsCountAfter).eq(bettorsCountBefore + bettorCount)
 }
+ 
+async function verifyBettorsBalance(winners, lossers) {
+	for(let i =0; i <winners.length; i++ ) {
+		const winnerBalance  = await bettingToken.balanceOf(winners[i].address)
+		expect(winnerBalance).eq(20)
+	}
 
+	for(let i =0; i <lossers.length; i++ ) {
+		expect(await bettingToken.balanceOf(better1.address)).eq(0)
+	}
+}
+
+async function pledgeFundsToBetByBettors(amount, betId, teamAId, teamBId, team1Bettors, team2Bettors) {
+	for(let i = 0; i < team1Bettors.length; i++) {
+		await bettingContract.connect(team1Bettors[i]).pledgeFundsToBet(amount, betId, teamAId)
+	}
+
+	for(let i = 0; i < team2Bettors.length; i++) {
+		await bettingContract.connect(team2Bettors[i]).pledgeFundsToBet(amount, betId, teamBId)
+	}
+}
 
 describe("Betting Protocol", () => {
     let teamName1 = "Team 1"
@@ -89,8 +106,6 @@ describe("Betting Protocol", () => {
             expect(team.teamId).eq(1)  
             expect(team.name).eq(teamName1)  
             expect(team.isActive).eq(true)  
-
-            expect(await bettingContract.getTotalNumberOfTeams()).eq(teamCountAfter)
         })
 
         it("should emit TeamAdded Event with correct arguments when new team added", async () => {
@@ -136,13 +151,48 @@ describe("Betting Protocol", () => {
 
         it("should emit TeamInActive when team set to In-active", async () => {
             //Given
-            await bettingContract.addTeam(teamName1)
-            const teamId = await bettingContract.teamCount()
+			await bettingContract.addTeam("teamName1")
+            const teamId1 = await bettingContract.teamCount()
+
+			// When
+			await bettingContract.setTeamInActive(teamId1)
+
+			// Then
+			const teamDetails = await bettingContract.getTeamDetails(teamId1)
+			expect(teamDetails[2]).eq(false)
+
+
+            await bettingContract.addTeam("teamName2")
+            const teamId2 = await bettingContract.teamCount()
 
             // When & Then
-			await expect(bettingContract.setTeamInActive(teamId))
+			await expect(bettingContract.setTeamInActive(teamId2))
 				.to.emit(bettingContract, "TeamInActive")
-				.withArgs(teamId)
+				.withArgs(teamId2)
+		})
+
+		it("should emit TeamActive when team set to Active", async () => {
+            //Given
+			await bettingContract.addTeam("teamName1")
+            const teamId1 = await bettingContract.teamCount()
+			await bettingContract.setTeamInActive(teamId1)
+
+			// When
+			await bettingContract.setTeamToActive(teamId1)
+
+			// Then
+			const teamDetails = await bettingContract.getTeamDetails(teamId1)
+			expect(teamDetails[2]).eq(true)
+
+
+            await bettingContract.addTeam("teamName2")
+            const teamId2 = await bettingContract.teamCount()
+			await bettingContract.setTeamInActive(teamId2)
+
+            // When & Then
+			await expect(bettingContract.setTeamToActive(teamId2))
+				.to.emit(bettingContract, "TeamActive")
+				.withArgs(teamId2)
 		})
 
         describe("\n Bet Operations", () => {
@@ -325,7 +375,7 @@ describe("Betting Protocol", () => {
                 const teamId = 1
                 const amount = 10
 				await bettingContract.setBetToActive(betId)
-				await approveAndAllotFunds(better1, amount)
+				await approveAndAllotFunds([better1], amount)
                 await bettingContract.connect(better1).pledgeFundsToBet(amount, betId, teamId)
 
 
@@ -406,7 +456,6 @@ describe("Betting Protocol", () => {
 				).to.be.revertedWith("invalid team-id")
 			})
 
-
             it("should able to bet amount", async () => {
                 // Given
                 const [betId, teamAId, teamBId] = await createBetAndGetTeamsAndBetId()
@@ -423,8 +472,7 @@ describe("Betting Protocol", () => {
 				const bettor1BetDetailsBefore = await bettingContract.connect(better1).getBettorBetDetails(betId)
 				const bettor2BetDetailsBefore = await bettingContract.connect(better2).getBettorBetDetails(betId)
 
-                await approveAndAllotFunds(better1, amount)
-                await approveAndAllotFunds(better2, amount)
+                await approveAndAllotFunds([better1, better2], amount)
                 
                 // When
                 await bettingContract.connect(better1).pledgeFundsToBet(amount, betId, teamAId)
@@ -449,8 +497,179 @@ describe("Betting Protocol", () => {
 				
 				verifyBettorsOnTeam(bettorsOnTeamABefore.length, bettorsOnTeamAAfter.length, 1)
 				verifyBettorsOnTeam(bettorsOnTeamBBefore.length, bettorsOnTeamBAfter.length, 1)
-
 			})
         })
+
+		describe("\n Complete Bet", () => {
+			it("should throw error for invalid bet operations", async() => {
+				const [betId, teamAId, teamBId] = await createBetAndGetTeamsAndBetId()
+				const amount = 10;
+				// throw error in case of non-owner
+				await expect(
+					bettingContract
+						.connect(better1)
+						.setBetToCompleteAndTransferFundsToWinners(betId, teamAId)
+				).to.be.revertedWith("Not owner")
+
+				// throw error in case of invalid betId
+				const invalidBetId = betId + BigInt(1)
+				await expect(
+					bettingContract
+						.setBetToCompleteAndTransferFundsToWinners(invalidBetId, teamAId)
+				).to.be.revertedWith("invalid bet id")
+
+				// throw error in case of bet InActive
+				await expect(
+					bettingContract
+						.setBetToCompleteAndTransferFundsToWinners(betId, teamAId)
+				).to.be.revertedWith("bet inactive")
+
+				// throw error in case of invalid teamId
+				await bettingContract.setBetToActive(betId)
+				const [teamCId] = await addTeamsAndGetTeamIds()
+				await expect(
+					bettingContract
+						.setBetToCompleteAndTransferFundsToWinners(betId, teamCId)
+				).to.be.revertedWith("invalid teamId")
+
+				// throw error if wining team already specified
+				await approveAndAllotFunds([better1, better2, better3, better4], amount)
+				await pledgeFundsToBetByBettors(
+					amount,
+					betId,
+					teamAId,
+					teamBId,
+					[better1, better3],
+					[better2, better4]
+				)
+				await bettingContract.setBetToCompleteAndTransferFundsToWinners(betId, teamBId);
+
+				await expect(
+					bettingContract.setBetToCompleteAndTransferFundsToWinners(betId, teamBId)
+				).to.be.revertedWith("team already won")
+			})
+
+			it("should be able to complete bet and return funds to wining team bettors", async() => {
+				// Given
+				// Case 1 : Where Team 2 Wins
+				const amount = 10
+				const [betId, teamAId, teamBId] = await createBetAndGetTeamsAndBetId()
+				await bettingContract.setBetToActive(betId)
+
+				await approveAndAllotFunds([better1, better2, better3, better4], amount)
+
+				await pledgeFundsToBetByBettors(
+					amount,
+					betId,
+					teamAId,
+					teamBId,
+					[better1, better3],
+					[better2, better4]
+				)
+
+				// When
+				await bettingContract.setBetToCompleteAndTransferFundsToWinners(betId, teamBId)
+
+				// Then
+				verifyBettorsBalance([better2, better4], [better1, better3])
+
+				const betDetails = await bettingContract.getBetDetails(betId)
+				expect(betDetails[3]).eq(2) // bet status
+				expect(betDetails[4]).eq(teamBId)
+
+				// Case 2 : Where Team 1 Wins
+				const [betId1, teamCId, teamDId] = await createBetAndGetTeamsAndBetId()
+				await bettingContract.setBetToActive(betId1)
+
+				await approveAndAllotFunds([better1, better2, better3, better4], amount)
+
+				await pledgeFundsToBetByBettors(
+					amount,
+					betId1,
+					teamCId,
+					teamDId,
+					[better1, better3],
+					[better2, better4]
+				)
+
+				// When
+				await bettingContract.setBetToCompleteAndTransferFundsToWinners(betId1, teamCId)
+
+				// Then
+				verifyBettorsBalance([better1, better3], [better2, better4])
+
+				const betDetails1 = await bettingContract.getBetDetails(betId1)
+				expect(betDetails1[3]).eq(2) // bet status
+				expect(betDetails1[4]).eq(teamCId)
+			})
+		})
+
+		describe("\n Get Data Operations", () => {
+			it("should return total amount betted on a bet", async() => {
+				// Given
+				const amount = 10
+				const [betId, teamAId, teamBId] = await createBetAndGetTeamsAndBetId()
+				await bettingContract.setBetToActive(betId)
+
+				await approveAndAllotFunds([better1, better2, better3, better4], amount)
+
+				await pledgeFundsToBetByBettors(
+					amount,
+					betId,
+					teamAId,
+					teamBId,
+					[better1, better3],
+					[better2, better4]
+				)
+
+				// When
+				const betTotalPledgedFunds = await bettingContract.getTotalAmountBettedOnABet(betId)	
+				
+				// Then
+				const betDetails = await bettingContract.getBetDetails(betId)
+				const amountBettedOnTeamA = betDetails[5]
+				const amountBettedOnTeamB = betDetails[6]
+				expect(betTotalPledgedFunds).eq(amountBettedOnTeamA + amountBettedOnTeamB)
+			})
+
+			it("should return numbers of bets of a user", async() => {
+				// Given
+				const totalAmount = 20
+				const betAmount = 10;
+
+				const [betId, teamAId, teamBId] = await createBetAndGetTeamsAndBetId()
+				await bettingContract.setBetToActive(betId)
+
+				const [betId1, teamCId, teamDId] = await createBetAndGetTeamsAndBetId()
+				await bettingContract.setBetToActive(betId1)
+
+				await approveAndAllotFunds([better1], totalAmount)
+
+				await pledgeFundsToBetByBettors(betAmount, betId, teamAId, teamBId, [better1], [])
+				await pledgeFundsToBetByBettors(betAmount, betId1, teamCId, teamDId, [better1], [])
+
+				// When
+				const betCountOfBettor1 = await bettingContract.connect(better1).getAllBetsByUsers()
+
+				// Then
+				expect(betCountOfBettor1.length).eq(2)
+				expect(betCountOfBettor1[0]).eq(betId)
+				expect(betCountOfBettor1[1]).eq(betId1)
+			})
+
+			it("should return all teams", async() => {
+				// Given
+				await addTeamsAndGetTeamIds()
+				await addTeamsAndGetTeamIds()
+				const teamCount = await bettingContract.teamCount();
+
+				// When
+				const teams = await bettingContract.getAllTeams()
+				
+				// Then
+				expect(teams.length).eq(teamCount)
+			})
+		})
 	})
 })
+

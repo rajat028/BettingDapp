@@ -7,6 +7,7 @@ import "hardhat/console.sol";
 contract BettingProtocol {
     event TeamAdded(uint8 teamId);
     event TeamInActive(uint8 teamId);
+    event TeamActive(uint8 teamId);
     event BetCreated(
         uint betId,
         uint8 teamAId,
@@ -82,6 +83,14 @@ contract BettingProtocol {
         emit TeamInActive(teamCount);
     }
 
+    function setTeamToActive(uint8 teamId) external onlyOwner {
+        require(teamId <= teams.length && teamId > 0, "Invalid team-id");
+        Team storage team = teams[teamId - 1];
+        require(!team.isActive, "already active");
+        team.isActive = true;
+        emit TeamActive(teamCount);
+    }
+
     function createBet(
         uint8 teamAId,
         uint8 teamBId,
@@ -154,64 +163,39 @@ contract BettingProtocol {
         emit FundsPledgedToBet(betId, teamId, amount);
     }
 
-    function unPledgeFundsFromBet(uint betId) external validBetId(betId) {
-        Bet storage bet = bets[betId];
-        require(bet.betStatus == BetStatus.ACTIVE, "bet inactive");
-
-        uint amountBetted = bet.amountPledgedByBettor[msg.sender];
-        require(amountBetted > 0, "no funds pledged");
-
-        if (bet.selectedTeam[msg.sender] == bet.teamAId) {
-            bet.amountBettedToTeamA -= amountBetted;
-        } else {
-            bet.amountBettedToTeamB -= amountBetted;
-        }
-
-        removeUserBet(betId);
-        removeBettorFromBettedTeam(msg.sender, bet);
-
-        bet.selectedTeam[msg.sender] = 0;
-        bet.amountPledgedByBettor[msg.sender] = 0;
-        uint returnAmount = amountBetted - (amountBetted * 10) / 100;
-        bettingToken.transfer(msg.sender, returnAmount);
-
-        emit UnPledgedFundsFromBet(betId, msg.sender, returnAmount);
-    }
-
     function setBetToCompleteAndTransferFundsToWinners(
         uint betId,
         uint8 teamId
     ) external onlyOwner validBetId(betId) {
         Bet storage bet = bets[betId];
+        require(bet.wininngTeam == 0, "team already won");
         require(bet.betStatus == BetStatus.ACTIVE, "bet inactive");
-        require(bet.wininngTeam == 0, "bet already completed");
-        require(teamId != 0, "invalid teamId");
+        require(
+            teamId != 0 && (teamId == bet.teamAId || teamId == bet.teamBId),
+            "invalid teamId"
+        );
 
-        uint8 winingTeam;
+        address[] memory winners = bet.bettorsOnTeam[teamId];
         uint totalAmountOnWiningTeam;
         uint totalAmountOnLossingTeam;
-        address[] memory winners;
 
         if (teamId == bet.teamAId) {
-            winingTeam = bet.teamAId;
-            winners = bet.bettorsOnTeam[teamId];
             totalAmountOnWiningTeam = bet.amountBettedToTeamA;
             totalAmountOnLossingTeam = bet.amountBettedToTeamB;
         } else {
-            winingTeam = bet.teamBId;
-            winners = bet.bettorsOnTeam[teamId];
             totalAmountOnWiningTeam = bet.amountBettedToTeamB;
             totalAmountOnLossingTeam = bet.amountBettedToTeamA;
         }
 
         bet.wininngTeam = teamId;
 
+        //TODO winners.length should not be compiled eevery time loop runs
         for (uint i = 0; i < winners.length; i++) {
             uint pledgedFunds = bet.amountPledgedByBettor[winners[i]];
             uint winAmount = pledgedFunds +
                 ((pledgedFunds * totalAmountOnLossingTeam) /
                     totalAmountOnWiningTeam);
-            bettingToken.transferFrom(winners[i], address(this), winAmount);
+            bettingToken.transfer(winners[i], winAmount);
         }
         bet.betStatus = BetStatus.COMPLETED;
         emit BetCompleted(betId, bet.wininngTeam);
@@ -226,44 +210,6 @@ contract BettingProtocol {
 
     function getAllBetsByUsers() external view returns (uint[] memory) {
         return userBets[msg.sender];
-    }
-
-    function removeUserBet(uint betId) internal {
-        for (uint i = 0; i < userBets[msg.sender].length; i++) {
-            if (userBets[msg.sender][i] == betId) {
-                userBets[msg.sender][i] = userBets[msg.sender][i + 1];
-            }
-        }
-        userBets[msg.sender].pop();
-    }
-
-    function changeTeamName(string memory newName, uint8 teamId) external {
-        Team storage team = teams[teamId];
-        team.name = newName;
-    }
-
-    function removeBettorFromBettedTeam(
-        address bettor,
-        Bet storage bet
-    ) internal {
-        uint8 teamId = bet.selectedTeam[msg.sender];
-        for (uint i = 0; i < bet.bettorsOnTeam[teamId].length; i++) {
-            if (bet.bettorsOnTeam[teamId][i] == bettor) {
-                bet.bettorsOnTeam[teamId][i] = bet.bettorsOnTeam[
-                    teamId
-                ][i + 1];
-            }
-        }
-        bet.bettorsOnTeam[teamId].pop();
-    }
-
-    function containsTeamId(uint8 teamId) internal view returns (bool) {
-        for (uint i = 0; i < teams.length; i++) {
-            if (teams[i].teamId == teamId) {
-                return true;
-            }
-        }
-        return false;
     }
 
     function getBettorBetDetails(
@@ -291,12 +237,8 @@ contract BettingProtocol {
         );
     }
 
-    function getTotalNumberOfTeams() external view returns (uint) {
-        return teams.length;
-    }
-
     function getTeamDetails(uint teamId) external view returns (Team memory) {
-        return teams[teamId];
+        return teams[teamIdIndex(teamId)];
     }
 
     function getBettorsOnTeam(
@@ -315,15 +257,7 @@ contract BettingProtocol {
         return address(this);
     }
 
-    function getSelectedTeamByBettor(uint betId) external view returns (uint) {
-        Bet storage bet = bets[betId];
-        return bet.selectedTeam[msg.sender];
-    }
-
-    function getTotalAmountPledgedByBettor(
-        uint betId
-    ) external view returns (uint) {
-        Bet storage bet = bets[betId];
-        return bet.amountPledgedByBettor[msg.sender];
+    function getAllTeams() external view returns(Team[] memory) {
+        return teams;
     }
 }
