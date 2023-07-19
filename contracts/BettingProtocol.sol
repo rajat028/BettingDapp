@@ -188,9 +188,9 @@ contract BettingProtocol {
         }
 
         bet.wininngTeam = teamId;
+        uint winnersCount = winners.length;
 
-        //TODO winners.length should not be compiled eevery time loop runs
-        for (uint i = 0; i < winners.length; i++) {
+        for (uint i = 0; i < winnersCount; i++) {
             uint pledgedFunds = bet.amountPledgedByBettor[winners[i]];
             uint winAmount = pledgedFunds +
                 ((pledgedFunds * totalAmountOnLossingTeam) /
