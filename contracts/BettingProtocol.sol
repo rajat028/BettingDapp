@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "hardhat/console.sol";
+import "./IBettingProtocol.sol";
+import "./Configs.sol";
 
-contract BettingProtocol {
+contract BettingProtocol is IBettingProtocol, Configs {
     event TeamAdded(uint8 teamId);
     event TeamInActive(uint8 teamId);
     event TeamActive(uint8 teamId);
@@ -17,42 +18,6 @@ contract BettingProtocol {
     event FundsPledgedToBet(uint betId, uint8 teamId, uint amount);
     event UnPledgedFundsFromBet(uint betId, address bettor, uint returnAmount);
     event BetCompleted(uint betId, uint8 winingTeam);
-
-    IERC20 bettingToken;
-    address public owner;
-
-    enum BetStatus {
-        INACTIVE,
-        ACTIVE,
-        COMPLETED
-    }
-
-    uint public betCount;
-    struct Bet {
-        uint betId;
-        uint8 teamAId;
-        uint8 teamBId;
-        uint minBetAmount;
-        BetStatus betStatus;
-        uint8 wininngTeam;
-        uint amountBettedToTeamA;
-        uint amountBettedToTeamB;
-        mapping(uint8 => address[]) bettorsOnTeam;
-        mapping(address => uint8) selectedTeam;
-        mapping(address => uint) amountPledgedByBettor;
-    }
-
-    struct Team {
-        uint8 teamId;
-        string name;
-        bool isActive;
-    }
-
-    Bet[] public bets;
-    mapping(address => uint[]) userBets;
-
-    uint8 public teamCount;
-    Team[] public teams;
 
     constructor(IERC20 _bettingToken) {
         owner = msg.sender;
@@ -69,13 +34,13 @@ contract BettingProtocol {
         _;
     }
 
-    function addTeam(string memory name) external onlyOwner {
+    function addTeam(string memory name) external override onlyOwner {
         teamCount++;
         teams.push(Team(teamCount, name, true));
         emit TeamAdded(teamCount);
     }
 
-    function setTeamInActive(uint8 teamId) external onlyOwner {
+    function setTeamInActive(uint8 teamId) external override onlyOwner {
         require(teamId <= teams.length && teamId > 0, "Invalid team-id");
         Team storage team = teams[teamId - 1];
         require(team.isActive, "already inactive");
@@ -83,7 +48,7 @@ contract BettingProtocol {
         emit TeamInActive(teamCount);
     }
 
-    function setTeamToActive(uint8 teamId) external onlyOwner {
+    function setTeamToActive(uint8 teamId) external override onlyOwner {
         require(teamId <= teams.length && teamId > 0, "Invalid team-id");
         Team storage team = teams[teamId - 1];
         require(!team.isActive, "already active");
@@ -95,7 +60,7 @@ contract BettingProtocol {
         uint8 teamAId,
         uint8 teamBId,
         uint minBettingAmount
-    ) external onlyOwner {
+    ) external override onlyOwner {
         require(teamAId != teamBId, "same teams");
         require(minBettingAmount > 0, "Invalid amount");
         require(teamAId <= teams.length && teamAId > 0, "Invalid teamAId");
@@ -116,13 +81,17 @@ contract BettingProtocol {
         betCount++;
     }
 
-    function setBetToActive(uint betId) external onlyOwner validBetId(betId) {
+    function setBetToActive(
+        uint betId
+    ) external override onlyOwner validBetId(betId) {
         Bet storage bet = bets[betId];
         require(bet.betStatus == BetStatus.INACTIVE, "already active");
         bet.betStatus = BetStatus.ACTIVE;
     }
 
-    function setBetToInActive(uint betId) external onlyOwner validBetId(betId) {
+    function setBetToInActive(
+        uint betId
+    ) external override onlyOwner validBetId(betId) {
         Bet storage bet = bets[betId];
         require(bet.betStatus == BetStatus.ACTIVE, "bet already inactive");
         require(
@@ -136,7 +105,7 @@ contract BettingProtocol {
         uint amount,
         uint betId,
         uint8 teamId
-    ) external validBetId(betId) {
+    ) external override validBetId(betId) {
         Bet storage bet = bets[betId];
         require(
             teamId > 0 && (teamId == bet.teamAId || teamId == bet.teamBId),
@@ -166,7 +135,7 @@ contract BettingProtocol {
     function setBetToCompleteAndTransferFundsToWinners(
         uint betId,
         uint8 teamId
-    ) external onlyOwner validBetId(betId) {
+    ) external override onlyOwner validBetId(betId) {
         Bet storage bet = bets[betId];
         require(bet.wininngTeam == 0, "team already won");
         require(bet.betStatus == BetStatus.ACTIVE, "bet inactive");
@@ -203,7 +172,7 @@ contract BettingProtocol {
 
     function getTotalAmountBettedOnABet(
         uint betId
-    ) external view returns (uint) {
+    ) external view override returns (uint) {
         return
             bets[betId].amountBettedToTeamA + bets[betId].amountBettedToTeamB;
     }
@@ -214,7 +183,7 @@ contract BettingProtocol {
 
     function getBettorBetDetails(
         uint betId
-    ) external view returns (uint, uint) {
+    ) external view override returns (uint, uint) {
         Bet storage bet = bets[betId];
         return (
             bet.selectedTeam[msg.sender],
@@ -222,9 +191,29 @@ contract BettingProtocol {
         );
     }
 
+    function getBettorsOnTeam(
+        uint betId,
+        uint8 teamId
+    ) external view override returns (address[] memory) {
+        Bet storage bet = bets[betId];
+        return bet.bettorsOnTeam[teamId];
+    }
+
+    function getContractAddress() external view override returns (address) {
+        return address(this);
+    }
+
+    function getAllTeams() external view returns (Team[] memory) {
+        return teams;
+    }
+
     function getBetDetails(
         uint betId
-    ) external view returns (uint8, uint8, uint, BetStatus, uint8, uint, uint) {
+    )
+        external
+        view
+        returns (uint8, uint8, uint, BetStatus, uint8, uint, uint)
+    {
         Bet storage bet = bets[betId];
         return (
             bet.teamAId,
@@ -237,27 +226,13 @@ contract BettingProtocol {
         );
     }
 
-    function getTeamDetails(uint teamId) external view returns (Team memory) {
+    function getTeamDetails(
+        uint teamId
+    ) external view returns (Team memory) {
         return teams[teamIdIndex(teamId)];
-    }
-
-    function getBettorsOnTeam(
-        uint betId,
-        uint8 teamId
-    ) external view returns (address[] memory) {
-        Bet storage bet = bets[betId];
-        return bet.bettorsOnTeam[teamId];
     }
 
     function teamIdIndex(uint teamId) internal pure returns (uint) {
         return teamId - 1;
-    }
-
-    function getContractAddress() external view returns (address) {
-        return address(this);
-    }
-
-    function getAllTeams() external view returns(Team[] memory) {
-        return teams;
     }
 }
