@@ -1,4 +1,4 @@
-# Betting Dapp Readme
+# Betting Dapp
 
 The Betting Dapp is a decentralized application (Dapp) that showcases a simple betting application with various functionalities on the Ethereum blockchain. This Dapp allows users to place bets on different teams for specific events and provides functionality for the owner to manage the teams and bets.
 
